@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [compojure.core :refer [POST]]
+            [java-time :as t]
             [medley.core :as m]
             [metabase.api.common :as api]
             [metabase.mbql.schema :as mbql.s]
@@ -19,7 +20,7 @@
              [util :as qputil]]
             [metabase.query-processor.middleware.constraints :as constraints]
             [metabase.util
-             [date :as du]
+             [date-2 :as u.date]
              [export :as ex]
              [i18n :refer [trs tru]]
              [schema :as su]]
@@ -39,7 +40,7 @@
     (api/read-check Card source-card-id)
     source-card-id))
 
-(api/defendpoint POST "/"
+(api/defendpoint ^:returns-chan POST "/"
   "Execute a query and retrieve the results in the usual format."
   [:as {{:keys [database], :as query} :body}]
   {database s/Int}
@@ -107,13 +108,14 @@
   (api/let-404 [export-conf (ex/export-formats export-format)]
     (if (= status :completed)
       ;; successful query, send file
-      {:status  200
+      {:status  202
        :body    ((:export-fn export-conf)
                  (map #(some % [:display_name :name]) cols)
                  (maybe-modify-date-values cols rows))
        :headers {"Content-Type"        (str (:content-type export-conf) "; charset=utf-8")
                  "Content-Disposition" (format "attachment; filename=\"query_result_%s.%s\""
-                                               (du/date->iso-8601) (:ext export-conf))}}
+                                               (u.date/format (t/zoned-date-time))
+                                               (:ext export-conf))}}
       ;; failed query, send error message
       {:status (if (qp.error-type/server-error? error-type)
                  500
@@ -144,7 +146,7 @@
      (api/defendpoint POST [\"/:export-format\", :export-format export-format-regex]"
   (re-pattern (str "(" (str/join "|" (keys ex/export-formats)) ")")))
 
-(api/defendpoint-async POST ["/:export-format", :export-format export-format-regex]
+(api/defendpoint-async ^:returns-chan POST ["/:export-format", :export-format export-format-regex]
   "Execute a query and download the result data as a file in the specified format."
   [{{:keys [export-format query]} :params} respond raise]
   {query         su/JSONString
